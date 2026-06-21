@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SearchRouteImport } from './routes/search'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as BookingsRouteImport } from './routes/bookings'
 import { Route as AdminRouteImport } from './routes/admin'
@@ -20,6 +21,11 @@ import { Route as BusBusIdRouteImport } from './routes/bus.$busId'
 const SearchRoute = SearchRouteImport.update({
   id: '/search',
   path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CheckoutRoute = CheckoutRouteImport.update({
@@ -58,6 +64,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/bookings': typeof BookingsRoute
   '/checkout': typeof CheckoutRoute
+  '/login': typeof LoginRoute
   '/search': typeof SearchRoute
   '/bus/$busId': typeof BusBusIdRoute
   '/confirmation/$bookingId': typeof ConfirmationBookingIdRoute
@@ -67,6 +74,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/bookings': typeof BookingsRoute
   '/checkout': typeof CheckoutRoute
+  '/login': typeof LoginRoute
   '/search': typeof SearchRoute
   '/bus/$busId': typeof BusBusIdRoute
   '/confirmation/$bookingId': typeof ConfirmationBookingIdRoute
@@ -77,6 +85,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/bookings': typeof BookingsRoute
   '/checkout': typeof CheckoutRoute
+  '/login': typeof LoginRoute
   '/search': typeof SearchRoute
   '/bus/$busId': typeof BusBusIdRoute
   '/confirmation/$bookingId': typeof ConfirmationBookingIdRoute
@@ -88,6 +97,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/bookings'
     | '/checkout'
+    | '/login'
     | '/search'
     | '/bus/$busId'
     | '/confirmation/$bookingId'
@@ -97,6 +107,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/bookings'
     | '/checkout'
+    | '/login'
     | '/search'
     | '/bus/$busId'
     | '/confirmation/$bookingId'
@@ -106,6 +117,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/bookings'
     | '/checkout'
+    | '/login'
     | '/search'
     | '/bus/$busId'
     | '/confirmation/$bookingId'
@@ -116,6 +128,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   BookingsRoute: typeof BookingsRoute
   CheckoutRoute: typeof CheckoutRoute
+  LoginRoute: typeof LoginRoute
   SearchRoute: typeof SearchRoute
   BusBusIdRoute: typeof BusBusIdRoute
   ConfirmationBookingIdRoute: typeof ConfirmationBookingIdRoute
@@ -128,6 +141,13 @@ declare module '@tanstack/react-router' {
       path: '/search'
       fullPath: '/search'
       preLoaderRoute: typeof SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/checkout': {
@@ -180,6 +200,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   BookingsRoute: BookingsRoute,
   CheckoutRoute: CheckoutRoute,
+  LoginRoute: LoginRoute,
   SearchRoute: SearchRoute,
   BusBusIdRoute: BusBusIdRoute,
   ConfirmationBookingIdRoute: ConfirmationBookingIdRoute,
