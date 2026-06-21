@@ -53,7 +53,7 @@ function Checkout() {
           <div className="space-y-6">
             <Section title="Passenger details">
               <div className="space-y-4">
-                {seatList.map((seat, i) => (
+                {seatList.map((seat: string, i: number) => (
                   <div key={seat} className="rounded-xl border border-border bg-background p-4">
                     <div className="mb-3 flex items-center justify-between">
                       <span className="text-sm font-semibold">Seat {seat}</span>
