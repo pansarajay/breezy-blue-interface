@@ -1,12 +1,12 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { z } from "zod";
-import { ArrowLeft, Armchair, Steering, Info } from "lucide-react";
+import { ArrowLeft, Armchair, Info, CircleDot } from "lucide-react";
 import { Header, Footer } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { buildSeatMap, getBus, type SeatStatus } from "@/lib/bus-data";
 
-const Steer = Steering ?? (() => null);
+const Steer = CircleDot;
 
 const searchSchema = z.object({ date: z.string().default(new Date().toISOString().slice(0, 10)) });
 
