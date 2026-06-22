@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useLocation } from "@tanstack/react-router";
 import { Bus, Menu, User } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,8 @@ const links = [
 
 export function Header() {
   const [open, setOpen] = useState(false);
+  const { pathname } = useLocation();
+
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-card/80 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
@@ -23,17 +25,21 @@ export function Header() {
           <span className="text-lg font-bold tracking-tight">BusGo</span>
         </Link>
         <nav className="hidden items-center gap-1 md:flex">
-          {links.map((l) => (
-            <Link
-              key={l.to}
-              to={l.to}
-              className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              activeProps={{ className: "text-primary bg-primary/10" }}
-              activeOptions={{ exact: l.to === "/" }}
-            >
-              {l.label}
-            </Link>
-          ))}
+          {links.map((l) => {
+            const isActive = pathname === l.to;
+            return (
+              <Link
+                key={l.to}
+                to={l.to}
+                className={cn(
+                  "rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                  isActive && "text-primary bg-primary/10"
+                )}
+              >
+                {l.label}
+              </Link>
+            );
+          })}
         </nav>
         <div className="hidden items-center gap-2 md:flex">
           <Button variant="ghost" size="sm" asChild>
@@ -55,18 +61,22 @@ export function Header() {
       </div>
       <div className={cn("border-t border-border md:hidden", open ? "block" : "hidden")}>
         <div className="flex flex-col gap-1 px-4 py-3">
-          {links.map((l) => (
-            <Link
-              key={l.to}
-              to={l.to}
-              onClick={() => setOpen(false)}
-              className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-              activeProps={{ className: "text-primary bg-primary/10" }}
-              activeOptions={{ exact: l.to === "/" }}
-            >
-              {l.label}
-            </Link>
-          ))}
+          {links.map((l) => {
+            const isActive = pathname === l.to;
+            return (
+              <Link
+                key={l.to}
+                to={l.to}
+                onClick={() => setOpen(false)}
+                className={cn(
+                  "rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground",
+                  isActive && "text-primary bg-primary/10"
+                )}
+              >
+                {l.label}
+              </Link>
+            );
+          })}
           <div className="mt-2 flex gap-2">
             <Button variant="outline" size="sm" asChild className="flex-1">
               <Link to="/login">Login</Link>
