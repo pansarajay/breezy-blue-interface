@@ -1,6 +1,9 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Bus, Mail, Lock } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api-client";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/login")({
   head: () => ({ meta: [{ title: "Sign in — BusGo" }, { name: "description", content: "Sign in to manage your bus bookings." }] }),
@@ -8,6 +11,39 @@ export const Route = createFileRoute("/login")({
 });
 
 function Login() {
+  const navigate = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) {
+      toast.error("Please enter both email and password.");
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const res = await api.post<{ token: string; user: unknown }>("/auth/login", { email, password });
+      localStorage.setItem("busgo_token", res.token);
+      localStorage.setItem("busgo_user", JSON.stringify(res.user));
+      
+      // Dispatch authentication change event
+      window.dispatchEvent(new Event("auth_change"));
+      
+      toast.success("Successfully logged in!");
+      
+      // Check if there was a redirect or return to home
+      navigate({ to: "/" });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Invalid login credentials.";
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       {/* Left brand panel */}
@@ -28,7 +64,7 @@ function Login() {
 
       {/* Form */}
       <div className="flex items-center justify-center px-6 py-16">
-        <form className="w-full max-w-sm space-y-5" onSubmit={(e) => e.preventDefault()}>
+        <form className="w-full max-w-sm space-y-5" onSubmit={handleSubmit}>
           <div className="lg:hidden">
             <Link to="/" className="flex items-center gap-2"><div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-hero"><Bus className="h-5 w-5 text-primary-foreground" /></div><span className="font-bold">BusGo</span></Link>
           </div>
@@ -36,13 +72,15 @@ function Login() {
             <h1 className="text-2xl font-bold">Sign in</h1>
             <p className="mt-1 text-sm text-muted-foreground">Enter your details to continue</p>
           </div>
-          <Field icon={<Mail className="h-4 w-4" />} label="Email" type="email" placeholder="you@example.com" />
-          <Field icon={<Lock className="h-4 w-4" />} label="Password" type="password" placeholder="••••••••" />
+          <Field icon={<Mail className="h-4 w-4" />} label="Email" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <Field icon={<Lock className="h-4 w-4" />} label="Password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
           <div className="flex items-center justify-between text-xs">
             <label className="inline-flex items-center gap-2"><input type="checkbox" className="h-3.5 w-3.5 accent-[color:var(--primary)]" /> Remember me</label>
             <a href="#" className="font-medium text-primary hover:underline">Forgot password?</a>
           </div>
-          <Button variant="hero" className="w-full">Sign in</Button>
+          <Button type="submit" variant="hero" className="w-full" disabled={loading}>
+            {loading ? "Signing in..." : "Sign in"}
+          </Button>
           <p className="text-center text-sm text-muted-foreground">
             Don't have an account?{" "}
             <Link to="/register" className="font-semibold text-primary hover:underline">Sign up</Link>

@@ -1,10 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { z } from "zod";
-import { ArrowLeft, Armchair, Info, CircleDot } from "lucide-react";
+import { ArrowLeft, Armchair, Info, CircleDot, Loader2 } from "lucide-react";
 import { Header, Footer } from "@/components/layout";
 import { Button } from "@/components/ui/button";
-import { buildSeatMap, getBus, type SeatStatus } from "@/lib/bus-data";
+import { api } from "@/lib/api-client";
+import { type SeatStatus } from "@/lib/bus-data";
 
 const Steer = CircleDot;
 
@@ -22,40 +23,77 @@ export const Route = createFileRoute("/bus/$busId")({
 });
 
 function BusDetailPage() {
-  const { busId } = Route.useParams();
+  const { busId } = Route.useParams(); // schedule ID
   const { date } = Route.useSearch();
   const navigate = useNavigate();
-  const bus = getBus(busId);
+  
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
 
-  if (!bus) {
+  useEffect(() => {
+    const fetchSeats = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api.get<any>(`/buses/schedule/${busId}/seats`);
+        setData(res);
+      } catch (err: any) {
+        setError(err.message || "Failed to load seat layout");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchSeats();
+  }, [busId]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="flex flex-col items-center justify-center py-42 text-muted-foreground">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="mt-2 text-sm">Loading seat layout...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !data) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
         <div className="mx-auto max-w-3xl px-4 py-20 text-center">
-          <h1 className="text-2xl font-bold">Bus not found</h1>
+          <h1 className="text-2xl font-bold text-destructive">Error Loading Layout</h1>
+          <p className="mt-2 text-muted-foreground">{error || "Schedule not found"}</p>
           <Button asChild className="mt-4"><Link to="/search" search={{ from: "Bengaluru", to: "Mumbai", date }}>Back to search</Link></Button>
         </div>
       </div>
     );
   }
 
-  const seats = useMemo(() => buildSeatMap(bus), [bus]);
+  const bus = data.bus;
+  const fare = data.fare;
+  const seats = data.seats;
+  const boardingPoints = data.boardingPoints;
+  const droppingPoints = data.droppingPoints;
+
   const toggle = (id: string, status: SeatStatus) => {
     if (status === "booked" || status === "female") return;
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length < 6 ? [...s, id] : s));
   };
 
-  const total = selected.length * bus.fare;
-  const lower = seats.filter((s) => s.deck === "lower");
-  const upper = seats.filter((s) => s.deck === "upper");
+  const total = selected.length * fare;
+  const lower = seats.filter((s: any) => s.deck === "lower");
+  const upper = seats.filter((s: any) => s.deck === "upper");
 
   return (
     <div className="min-h-screen bg-background pb-32">
       <Header />
 
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-        <Link to="/search" search={{ from: bus.from, to: bus.to, date }} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <Link to="/search" search={{ from: data.route.source, to: data.route.destination, date }} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Back to results
         </Link>
 
@@ -65,18 +103,18 @@ function BusDetailPage() {
             <div className="rounded-2xl border border-border bg-card p-6 shadow-soft">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h1 className="text-xl font-bold">{bus.operator}</h1>
-                  <p className="text-sm text-muted-foreground">{bus.type} · {bus.busNumber}</p>
+                  <h1 className="text-xl font-bold">{bus.bus_name}</h1>
+                  <p className="text-sm text-muted-foreground">{bus.bus_type} · {bus.bus_number}</p>
                 </div>
                 <div className="text-right">
                   <div className="text-sm text-muted-foreground">Starting at</div>
-                  <div className="text-2xl font-bold">₹{bus.fare}</div>
+                  <div className="text-2xl font-bold">₹{fare}</div>
                 </div>
               </div>
               <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
-                <Stat label="Departure" value={`${bus.departure} · ${bus.from}`} />
-                <Stat label="Duration" value={bus.duration} />
-                <Stat label="Arrival" value={`${bus.arrival} · ${bus.to}`} />
+                <Stat label="Departure" value={`${data.departure_time} · ${data.route.source}`} />
+                <Stat label="Duration" value={`${Math.floor(data.route.duration / 60)}h ${data.route.duration % 60}m`} />
+                <Stat label="Arrival" value={`${data.arrival_time} · ${data.route.destination}`} />
               </div>
             </div>
 
@@ -93,8 +131,8 @@ function BusDetailPage() {
 
             {/* Boarding & dropping */}
             <div className="grid gap-4 md:grid-cols-2">
-              <Points title="Boarding points" points={bus.boardingPoints} />
-              <Points title="Dropping points" points={bus.droppingPoints} />
+              <Points title="Boarding points" points={boardingPoints} />
+              <Points title="Dropping points" points={droppingPoints} />
             </div>
           </div>
 
@@ -118,7 +156,7 @@ function BusDetailPage() {
                 className="mt-4 w-full"
                 disabled={selected.length === 0}
                 onClick={() =>
-                  navigate({ to: "/checkout", search: { busId: bus.id, seats: selected.join(","), date } })
+                  navigate({ to: "/checkout", search: { busId: String(data.schedule_id), seats: selected.join(","), date } })
                 }
               >
                 Continue · ₹{total + Math.round(total * 0.05)}

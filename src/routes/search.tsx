@@ -1,10 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { z } from "zod";
-import { ArrowRight, Bus as BusIcon, Clock, Star, Wifi, Zap, Filter as FilterIcon } from "lucide-react";
+import { ArrowRight, Bus as BusIcon, Clock, Star, Wifi, Zap, Filter as FilterIcon, Loader2 } from "lucide-react";
 import { Header, Footer } from "@/components/layout";
 import { Button } from "@/components/ui/button";
-import { BUSES, type Bus } from "@/lib/bus-data";
+import { api } from "@/lib/api-client";
+import { type Bus } from "@/lib/bus-data";
 
 const searchSchema = z.object({
   from: z.string().default("Bengaluru"),
@@ -25,14 +26,44 @@ function SearchPage() {
   const [types, setTypes] = useState<string[]>([]);
   const [maxPrice, setMaxPrice] = useState(2500);
   const [sort, setSort] = useState<"departure" | "price" | "rating">("departure");
+  const [results, setResults] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const results = useMemo(() => {
-    let r = BUSES.filter((b) => b.fare <= maxPrice && (types.length === 0 || types.includes(b.type)));
-    if (sort === "price") r = [...r].sort((a, b) => a.fare - b.fare);
-    if (sort === "rating") r = [...r].sort((a, b) => b.rating - a.rating);
-    if (sort === "departure") r = [...r].sort((a, b) => a.departure.localeCompare(b.departure));
-    return r;
-  }, [types, maxPrice, sort]);
+  useEffect(() => {
+    const fetchBuses = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const queryParams = new URLSearchParams({
+          from,
+          to,
+          date,
+          sort
+        });
+        
+        // Append selected types
+        types.forEach(t => queryParams.append('types', t));
+        queryParams.append('max_price', maxPrice.toString());
+
+        const data = await api.get<any[]>(`/buses/search?${queryParams.toString()}`);
+        
+        // Map schedule_id to id so it works with Bus type expected by cards
+        const mapped = data.map((item) => ({
+          ...item,
+          id: String(item.schedule_id) // Using schedule ID for seat selection route parameter
+        }));
+        
+        setResults(mapped);
+      } catch (err: any) {
+        setError(err.message || "Failed to search buses");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchBuses();
+  }, [from, to, date, sort, types, maxPrice]);
 
   const toggleType = (t: string) =>
     setTypes((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
@@ -76,7 +107,7 @@ function SearchPage() {
 
           <div>
             <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Max price: ₹{maxPrice}</h4>
-            <input type="range" min={500} max={2500} step={50} value={maxPrice} onChange={(e) => setMaxPrice(Number(e.target.value))} className="w-full accent-[color:var(--primary)]" />
+            <input type="range" min={300} max={2500} step={50} value={maxPrice} onChange={(e) => setMaxPrice(Number(e.target.value))} className="w-full accent-[color:var(--primary)]" />
           </div>
         </aside>
 
@@ -86,7 +117,7 @@ function SearchPage() {
             <p className="text-sm text-muted-foreground">{results.length} buses found</p>
             <div className="flex items-center gap-2 text-sm">
               <span className="text-muted-foreground">Sort:</span>
-              <select value={sort} onChange={(e) => setSort(e.target.value as never)} className="rounded-md border border-border bg-card px-2 py-1 text-sm">
+              <select value={sort} onChange={(e) => setSort(e.target.value as any)} className="rounded-md border border-border bg-card px-2 py-1 text-sm">
                 <option value="departure">Departure</option>
                 <option value="price">Price (low to high)</option>
                 <option value="rating">Rating</option>
@@ -94,14 +125,25 @@ function SearchPage() {
             </div>
           </div>
 
-          <div className="space-y-4">
-            {results.map((b) => <BusCard key={b.id} bus={b} date={date} />)}
-            {results.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center text-muted-foreground">
-                No buses match the selected filters.
-              </div>
-            )}
-          </div>
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="mt-2 text-sm">Finding active schedules...</p>
+            </div>
+          ) : error ? (
+            <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-6 text-center text-destructive">
+              {error}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {results.map((b) => <BusCard key={b.id} bus={b} date={date} />)}
+              {results.length === 0 && (
+                <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center text-muted-foreground">
+                  No buses match the selected filters.
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

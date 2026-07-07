@@ -1,10 +1,11 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { z } from "zod";
-import { CreditCard, Smartphone, Wallet, ShieldCheck, ArrowLeft } from "lucide-react";
+import { CreditCard, Smartphone, Wallet, ShieldCheck, ArrowLeft, Loader2, AlertCircle } from "lucide-react";
 import { Header, Footer } from "@/components/layout";
 import { Button } from "@/components/ui/button";
-import { getBus } from "@/lib/bus-data";
+import { api } from "@/lib/api-client";
+import { toast } from "sonner";
 
 const search = z.object({
   busId: z.string(),
@@ -23,22 +24,130 @@ type Passenger = { name: string; age: string; gender: "M" | "F" };
 function Checkout() {
   const { busId, seats, date } = Route.useSearch();
   const navigate = useNavigate();
-  const bus = getBus(busId);
   const seatList = seats.split(",").filter(Boolean);
+
+  const [scheduleData, setScheduleData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [paying, setPaying] = useState(false);
 
   const [pax, setPax] = useState<Passenger[]>(seatList.map(() => ({ name: "", age: "", gender: "M" })));
   const [contact, setContact] = useState({ email: "", phone: "" });
   const [method, setMethod] = useState<"upi" | "card" | "wallet" | "netbanking">("upi");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  if (!bus) return null;
-  const subtotal = seatList.length * bus.fare;
+  useEffect(() => {
+    // Check if user is authenticated
+    const token = localStorage.getItem("busgo_token");
+    setIsAuthenticated(!!token);
+    
+    // Auto-fill contact details if logged in
+    const userStr = localStorage.getItem("busgo_user");
+    if (userStr) {
+      try {
+        const u = JSON.parse(userStr);
+        setContact({ email: u.email || "", phone: u.mobile_number || "" });
+      } catch {}
+    }
+
+    const fetchScheduleDetails = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api.get<any>(`/buses/schedule/${busId}/seats`);
+        setScheduleData(res);
+      } catch (err: any) {
+        setError(err.message || "Failed to load schedule details");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchScheduleDetails();
+  }, [busId]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="flex flex-col items-center justify-center py-42 text-muted-foreground">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="mt-2 text-sm">Initializing passenger checkout session...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !scheduleData) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="mx-auto max-w-3xl px-4 py-20 text-center">
+          <h1 className="text-2xl font-bold text-destructive">Checkout Failed</h1>
+          <p className="mt-2 text-muted-foreground">{error || "Schedule not found"}</p>
+          <Button asChild className="mt-4"><Link to="/">Back to search</Link></Button>
+        </div>
+      </div>
+    );
+  }
+
+  const bus = scheduleData.bus;
+  const fare = scheduleData.fare;
+  const subtotal = seatList.length * fare;
   const tax = Math.round(subtotal * 0.05);
   const total = subtotal + tax;
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const bookingId = "BG" + Math.random().toString(36).slice(2, 8).toUpperCase();
-    navigate({ to: "/confirmation/$bookingId", params: { bookingId }, search: { busId, seats, date } });
+    if (!isAuthenticated) {
+      toast.error("Please sign in or create an account to book tickets.");
+      navigate({ to: "/login" });
+      return;
+    }
+
+    setPaying(true);
+    toast.info("Initiating secure booking process...");
+    
+    try {
+      // 1. Post booking creation (sets to Pending and locks seats)
+      const bookingRes = await api.post<any>("/bookings", {
+        schedule_id: Number(busId),
+        seats: seatList,
+        passengers: pax.map((p) => ({
+          name: p.name,
+          age: Number(p.age),
+          gender: p.gender
+        })),
+        email: contact.email,
+        phone: contact.phone
+      });
+      
+      const bookingId = bookingRes.booking_id;
+      
+      // 2. Simulate Razorpay Gateway Interaction
+      toast.loading("Contacting Razorpay APIs... Please wait.", { id: "razorpay_payment" });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      
+      // 3. Confirm and verify payment transaction signature
+      toast.loading("Verifying transaction credentials...", { id: "razorpay_payment" });
+      await api.post<any>("/payments/verify", {
+        booking_id: bookingId,
+        payment_method: method.toUpperCase(),
+        status: "Success"
+      });
+      
+      toast.success("Payment successful! E-ticket issued.", { id: "razorpay_payment" });
+      
+      // Navigate to confirmation
+      navigate({
+        to: "/confirmation/$bookingId",
+        params: { bookingId },
+        search: { busId, seats, date }
+      });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to finalize booking.", { id: "razorpay_payment" });
+    } finally {
+      setPaying(false);
+    }
   };
 
   return (
@@ -48,6 +157,16 @@ function Checkout() {
         <Link to="/bus/$busId" params={{ busId }} search={{ date }} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Back to seat selection
         </Link>
+
+        {!isAuthenticated && (
+          <div className="mt-4 flex items-center gap-3 rounded-xl border border-warning/30 bg-warning/5 p-4 text-sm text-warning-foreground">
+            <AlertCircle className="h-5 w-5 shrink-0 text-warning" />
+            <div>
+              <span className="font-semibold">Sign in required:</span> You must be signed in to book tickets.{" "}
+              <Link to="/login" className="font-bold underline hover:opacity-80">Login here</Link> to proceed.
+            </div>
+          </div>
+        )}
 
         <form onSubmit={submit} className="mt-4 grid gap-6 lg:grid-cols-[1fr_360px]">
           <div className="space-y-6">
@@ -65,8 +184,8 @@ function Checkout() {
                       <div className="flex rounded-md border border-border bg-card p-0.5">
                         {(["M", "F"] as const).map((g) => (
                           <button key={g} type="button"
-                            onClick={() => setPax((p) => p.map((x, k) => k === i ? { ...x, gender: g } : x))}
-                            className={`flex-1 rounded text-sm font-medium py-1.5 ${pax[i].gender === g ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
+                             onClick={() => setPax((p) => p.map((x, k) => k === i ? { ...x, gender: g } : x))}
+                             className={`flex-1 rounded text-sm font-medium py-1.5 ${pax[i].gender === g ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
                           >{g === "M" ? "Male" : "Female"}</button>
                         ))}
                       </div>
@@ -92,7 +211,7 @@ function Checkout() {
                   { id: "wallet", label: "Wallet", icon: <Wallet className="h-4 w-4" /> },
                   { id: "netbanking", label: "Net Banking", icon: <ShieldCheck className="h-4 w-4" /> },
                 ].map((m) => (
-                  <button key={m.id} type="button" onClick={() => setMethod(m.id as never)}
+                  <button key={m.id} type="button" onClick={() => setMethod(m.id as any)}
                     className={`flex flex-col items-center gap-2 rounded-xl border p-4 text-sm font-medium transition-all ${method === m.id ? "border-primary bg-primary/5 text-primary" : "border-border bg-card text-muted-foreground hover:border-primary/40"}`}>
                     {m.icon} {m.label}
                   </button>
@@ -103,12 +222,12 @@ function Checkout() {
 
           <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
             <div className="rounded-2xl border border-border bg-card p-6 shadow-soft">
-              <h3 className="font-semibold">{bus.operator}</h3>
-              <p className="text-xs text-muted-foreground">{bus.type}</p>
+              <h3 className="font-semibold">{bus.bus_name}</h3>
+              <p className="text-xs text-muted-foreground">{bus.bus_type}</p>
               <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                <div><div className="font-semibold">{bus.departure}</div><div className="text-muted-foreground">{bus.from}</div></div>
-                <div className="text-center text-muted-foreground">{bus.duration}</div>
-                <div className="text-right"><div className="font-semibold">{bus.arrival}</div><div className="text-muted-foreground">{bus.to}</div></div>
+                <div><div className="font-semibold">{scheduleData.departure_time}</div><div className="text-muted-foreground">{scheduleData.route.source}</div></div>
+                <div className="text-center text-muted-foreground">{Math.floor(scheduleData.route.duration / 60)}h {scheduleData.route.duration % 60}m</div>
+                <div className="text-right"><div className="font-semibold">{scheduleData.arrival_time}</div><div className="text-muted-foreground">{scheduleData.route.destination}</div></div>
               </div>
               <div className="my-4 border-t border-border" />
               <div className="space-y-1.5 text-sm">
@@ -117,7 +236,9 @@ function Checkout() {
                 <div className="my-2 border-t border-border" />
                 <Row label="Total" value={`₹${total}`} bold />
               </div>
-              <Button type="submit" variant="hero" className="mt-4 w-full">Pay ₹{total} securely</Button>
+              <Button type="submit" variant="hero" className="mt-4 w-full" disabled={paying || !isAuthenticated}>
+                {paying ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Processing Payment...</> : `Pay ₹${total} securely`}
+              </Button>
               <p className="mt-3 flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
                 <ShieldCheck className="h-3 w-3 text-success" /> 256-bit secure payment by Razorpay
               </p>
