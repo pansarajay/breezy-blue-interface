@@ -1,9 +1,14 @@
+import secrets
+import time
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from models import db, User, UserProfile
 from app import bcrypt
 
 auth_bp = Blueprint('auth', __name__)
+
+PASSWORD_RESET_OTP_TTL_SECONDS = 600
+_password_reset_otps = {}
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
@@ -13,11 +18,10 @@ def register():
     full_name = data.get('full_name')
     mobile_number = data.get('mobile_number')
     password = data.get('password')
-    role = data.get('role', 'user') # 'user' or 'admin'
     
     if not email or not full_name or not mobile_number or not password:
         return jsonify({'error': 'Please provide all required fields: email, full_name, mobile_number, password'}), 400
-        
+
     # Check if duplicate email
     if User.query.filter_by(email=email).first():
         return jsonify({'error': 'An account with this email already exists'}), 400
@@ -33,7 +37,7 @@ def register():
         email=email,
         mobile_number=mobile_number,
         password_hash=hashed_pwd,
-        role=role
+        role='user'
     )
     
     db.session.add(user)
@@ -157,16 +161,26 @@ def reset_password():
     if not otp:
         # Stage 1: Request reset OTP
         # In production, send email with OTP. Here, we return successful notification.
-        print(f"PASSWORD RESET REQUESTED FOR: {email}. Simulated OTP code: 123456")
+        otp_code = f"{secrets.randbelow(1000000):06d}"
+        _password_reset_otps[email] = (otp_code, time.time() + PASSWORD_RESET_OTP_TTL_SECONDS)
+        print(f"PASSWORD RESET REQUESTED FOR: {email}. Simulated OTP code: {otp_code} (valid for {PASSWORD_RESET_OTP_TTL_SECONDS // 60} minutes)")
         return jsonify({'message': 'Verification OTP sent to email', 'otp_sent': True}), 200
         
     # Stage 2: Verify OTP and set password
-    if otp != '123456':
-        return jsonify({'error': 'Invalid OTP verification code'}), 400
+    record = _password_reset_otps.get(email)
+    if (
+        not record
+        or time.time() > record[1]
+        or otp is None
+        or not secrets.compare_digest(str(otp), record[0])
+    ):
+        _password_reset_otps.pop(email, None)
+        return jsonify({'error': 'Invalid or expired OTP verification code'}), 400
         
     if not new_password or len(new_password) < 6:
         return jsonify({'error': 'Please provide a valid new password (min 6 characters)'}), 400
         
+    _password_reset_otps.pop(email, None)
     user.password_hash = bcrypt.generate_password_hash(new_password).decode('utf-8')
     db.session.commit()
     

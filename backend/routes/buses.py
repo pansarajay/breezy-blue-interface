@@ -2,6 +2,7 @@ import json
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from models import db, Bus, Schedule, Route, Booking, Passenger, User
+from routes.bookings_payments import expire_stale_pending_bookings
 
 buses_bp = Blueprint('buses', __name__)
 
@@ -97,6 +98,7 @@ def get_schedule_seats(schedule_id):
     if not schedule:
         return jsonify({'error': 'Schedule not found'}), 404
         
+    expire_stale_pending_bookings()
     bus = schedule.bus
     
     # Query all active booked seats on this schedule

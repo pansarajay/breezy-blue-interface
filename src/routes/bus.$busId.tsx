@@ -162,7 +162,7 @@ function BusDetailPage() {
                 Continue · ₹{total + Math.round(total * 0.05)}
               </Button>
               <p className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground">
-                <Info className="h-3 w-3" /> Seats are held for 8 minutes after selection.
+                <Info className="h-3 w-3" /> Seats are held for 5 minutes once booking is initiated.
               </p>
             </div>
           </aside>

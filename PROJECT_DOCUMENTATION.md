@@ -24,6 +24,7 @@
 9. [Complete User Booking Journey](#9-complete-user-booking-journey)
 10. [Key Concepts for Beginners](#10-key-concepts-for-beginners)
 11. [Glossary](#11-glossary)
+12. [Changelog — Security & Booking Fixes](#12-changelog--security--booking-fixes)
 
 ---
 
@@ -909,4 +910,98 @@ hidden md:flex   → Hidden on small screens, visible on medium+
 
 ---
 
-> **Last updated**: July 2026 · Generated from full source code analysis
+## 12. Changelog — Security & Booking Fixes
+
+> **Date**: August 2026
+> A security and reliability review identified several critical issues. The following fixes have been implemented and verified with an automated test suite (14/14 checks passing).
+
+### Fix 1 — Privilege Escalation at Registration (CRITICAL)
+
+**File:** `backend/routes/auth.py`
+
+**The bug:** The `/api/auth/register` endpoint read the user's role directly from the request body (`data.get('role', 'user')`). Anyone could send `{"role": "admin"}` when signing up and instantly receive full admin privileges (fleet management, reports, analytics).
+
+**The fix:** Registration now **always creates accounts with the `role` hardcoded to `'user'`**, regardless of what the client sends. Admin accounts can no longer be created through the public API — they are provisioned exclusively via the seed script (`init_db.py`) or manually by a developer.
+
+```python
+user = User(
+    ...
+    password_hash=hashed_pwd,
+    role='user'   # always 'user' — never trust client input for roles
+)
+```
+
+### Fix 2 — Hardcoded Password-Reset OTP (CRITICAL)
+
+**File:** `backend/routes/auth.py`
+
+**The bug:** The "forgot password" flow verified every OTP against the literal string `'123456'`. Since the OTP was a fixed, publicly-known value, anyone who knew a victim's email address could reset their password — a full account-takeover vulnerability.
+
+**The fix:**
+- Each reset request now generates a **random 6-digit OTP** using the cryptographically secure `secrets` module.
+- The OTP is stored in memory with a **10-minute expiry** (`PASSWORD_RESET_OTP_TTL_SECONDS = 600`) instead of being a permanent constant.
+- OTP comparison uses `secrets.compare_digest()` (timing-attack safe).
+- The OTP is **invalidated after first use** and also on a failed attempt, preventing brute-force guessing.
+- For development (where no email service exists), the code is printed to the server console only.
+
+> **Production note:** Replace the `print(...)` call with a real email/SMS provider integration before deploying.
+
+### Fix 3 — Double-Booking Race Condition (HIGH)
+
+**Files:** `backend/routes/bookings_payments.py`, `backend/routes/buses.py`
+
+**The bug:** When creating a booking, the backend checked seat availability *and then* inserted the booking as two separate steps. Two users clicking "Pay" at the same time for the same seat could both pass the availability check before either insert committed — both would get confirmed tickets for the same physical seat. There was no lock or unique constraint protecting this sequence.
+
+**The fix:** The entire check-and-insert critical section is now wrapped in a **process-level threading lock** (`_booking_lock`), making seat allocation atomic:
+
+```python
+with _booking_lock:
+    expire_stale_pending_bookings()
+    # 1. re-check occupied seats
+    # 2. calculate price
+    # 3. insert Booking + Passengers
+    # 4. commit
+```
+
+Only one booking request can execute this block at a time, so two simultaneous requests can no longer both win the same seat (the loser correctly receives `"Seat X is already booked or locked"`). Additionally, expired seat holds are reaped inside the lock so freed seats become bookable immediately.
+
+> **Production note:** This lock protects a single server process (the current SQLite dev setup). If you deploy across multiple workers/processes, enforce uniqueness at the database level (e.g., a partial unique index on `(schedule_id, seat_number)` for active bookings, or `SELECT ... FOR UPDATE` row locks on PostgreSQL).
+
+### Fix 4 — Failed/Abandoned Payments Locked Seats Forever (HIGH)
+
+**Files:** `backend/routes/bookings_payments.py`, `backend/routes/buses.py`, `src/routes/checkout.tsx`, `src/routes/bus.$busId.tsx`
+
+**The bug:** Creating a booking immediately set it to `Pending`, which counted its seats as occupied. If payment then failed (network error, timeout, user closed the tab during checkout), nothing ever cleaned up that Pending booking — the seats stayed locked **forever**. Retrying showed *"Seat X is already booked or locked"* even though nobody actually held them. There were three related gaps:
+
+1. No expiry/TTL on Pending bookings anywhere in the backend.
+2. The frontend did not release seats when payment verification failed.
+3. An expired hold could theoretically still be "confirmed" by a late payment-verify call.
+
+**The fix (three layers of defense):**
+
+1. **Server-side TTL sweep** — A new helper `expire_stale_pending_bookings()` automatically cancels any `Pending` booking older than **5 minutes** (`PENDING_BOOKING_TTL_MINUTES = 5`), releasing its seats. It runs at the start of every new booking request and whenever a seat map is loaded (`GET /api/buses/schedule/<id>/seats`), so stale holds disappear without needing a background worker.
+2. **Frontend cleanup on failure** — If payment fails after booking creation, `checkout.tsx` now checks whether that booking is still `Pending` and calls the cancel endpoint to release the seats immediately, showing *"Your selected seats have been released."* Users no longer need to wait out the TTL to retry.
+3. **Expiry enforced at payment time** — `verify_payment()` now rejects confirmation attempts on bookings older than the TTL (they get cancelled with *"Seat hold has expired"*), preventing an old abandoned hold from being revived after its seats were resold.
+
+The seat-selection page text was also corrected from "held for 8 minutes after selection" to the accurate behavior: **"Seats are held for 5 minutes once booking is initiated."**
+
+### Verification
+
+All fixes were validated with a scripted end-to-end test against the Flask app:
+
+| Check | Result |
+|---|---|
+| Registration ignores client-supplied `role` | ✅ |
+| OTP randomly generated per request | ✅ |
+| Hardcoded OTP `123456` rejected | ✅ |
+| Correct fresh OTP accepted + login works with new password | ✅ |
+| 3× concurrent same-seat races → exactly one winner each | ✅ |
+| Pending hold blocks other users | ✅ |
+| Expired hold shows seat as available again | ✅ |
+| Payment verify rejected for expired hold | ✅ |
+| Freed seat becomes bookable by another user | ✅ |
+| Normal happy-path booking + payment unaffected | ✅ |
+
+---
+
+> **Last updated**: August 2026 · Generated from full source code analysis

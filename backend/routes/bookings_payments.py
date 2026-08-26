@@ -1,11 +1,29 @@
 import random
 import string
 import datetime
+import threading
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from models import db, Booking, Passenger, Payment, Schedule, Bus, User
 
 bookings_bp = Blueprint('bookings_payments', __name__)
+
+PENDING_BOOKING_TTL_MINUTES = 5
+_booking_lock = threading.Lock()
+
+def expire_stale_pending_bookings():
+    """Cancel Pending bookings older than the seat-hold TTL so their seats are released."""
+    cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=PENDING_BOOKING_TTL_MINUTES)
+    stale = Booking.query.filter(
+        Booking.booking_status == 'Pending',
+        Booking.created_at < cutoff
+    ).all()
+    for booking in stale:
+        booking.booking_status = 'Cancelled'
+        print(f"SEAT LOCK EXPIRED: Pending booking {booking.booking_id} cancelled and seats released.")
+    if stale:
+        db.session.commit()
+    return len(stale)
 
 def generate_booking_id():
     # BG + 6 random alphanumeric characters
@@ -35,48 +53,51 @@ def create_booking():
     if len(seats_list) != len(passengers_info):
         return jsonify({'error': 'Passenger details must match selected seats count'}), 400
         
-    # Check if seats are already occupied
-    occupied_seats = db.session.query(Passenger.seat_number).join(Booking).filter(
-        Booking.schedule_id == schedule_id,
-        Booking.booking_status.in_(['Confirmed', 'Pending'])
-    ).all()
-    occupied_seats_set = {s[0] for s in occupied_seats}
-    
-    for seat in seats_list:
-        if seat in occupied_seats_set:
-            return jsonify({'error': f'Seat {seat} is already booked or locked'}), 400
-            
-    # Calculate price
-    subtotal = len(seats_list) * schedule.fare
-    tax = int(subtotal * 0.05) # 5% tax
-    total_amount = subtotal + tax
-    
-    booking_id = generate_booking_id()
-    
-    # Save booking in Pending status
-    booking = Booking(
-        booking_id=booking_id,
-        user_id=current_user_id,
-        schedule_id=schedule_id,
-        total_amount=total_amount,
-        booking_status='Pending'
-    )
-    
-    db.session.add(booking)
-    
-    # Save passengers
-    for i, seat in enumerate(seats_list):
-        pax_data = passengers_info[i]
-        passenger = Passenger(
-            booking_id=booking_id,
-            passenger_name=pax_data.get('name'),
-            age=int(pax_data.get('age', 25)),
-            gender=pax_data.get('gender', 'M'),
-            seat_number=seat
-        )
-        db.session.add(passenger)
+    with _booking_lock:
+        expire_stale_pending_bookings()
         
-    db.session.commit()
+        # Check if seats are already occupied
+        occupied_seats = db.session.query(Passenger.seat_number).join(Booking).filter(
+            Booking.schedule_id == schedule_id,
+            Booking.booking_status.in_(['Confirmed', 'Pending'])
+        ).all()
+        occupied_seats_set = {s[0] for s in occupied_seats}
+        
+        for seat in seats_list:
+            if seat in occupied_seats_set:
+                return jsonify({'error': f'Seat {seat} is already booked or locked'}), 400
+                
+        # Calculate price
+        subtotal = len(seats_list) * schedule.fare
+        tax = int(subtotal * 0.05) # 5% tax
+        total_amount = subtotal + tax
+        
+        booking_id = generate_booking_id()
+        
+        # Save booking in Pending status
+        booking = Booking(
+            booking_id=booking_id,
+            user_id=current_user_id,
+            schedule_id=schedule_id,
+            total_amount=total_amount,
+            booking_status='Pending'
+        )
+        
+        db.session.add(booking)
+        
+        # Save passengers
+        for i, seat in enumerate(seats_list):
+            pax_data = passengers_info[i]
+            passenger = Passenger(
+                booking_id=booking_id,
+                passenger_name=pax_data.get('name'),
+                age=int(pax_data.get('age', 25)),
+                gender=pax_data.get('gender', 'M'),
+                seat_number=seat
+            )
+            db.session.add(passenger)
+            
+        db.session.commit()
     
     # Return details + Razorpay Payment Order Simulator data
     # In production, we would call:
@@ -110,6 +131,11 @@ def verify_payment():
         
     if booking.booking_status != 'Pending':
         return jsonify({'error': f'Booking is already in {booking.booking_status} state'}), 400
+        
+    if booking.created_at and booking.created_at < datetime.datetime.utcnow() - datetime.timedelta(minutes=PENDING_BOOKING_TTL_MINUTES):
+        booking.booking_status = 'Cancelled'
+        db.session.commit()
+        return jsonify({'error': 'Seat hold has expired. Please start a new booking.'}), 400
         
     if not transaction_id:
         # Generate random transaction token

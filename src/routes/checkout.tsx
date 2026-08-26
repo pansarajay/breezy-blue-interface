@@ -107,6 +107,7 @@ function Checkout() {
     setPaying(true);
     toast.info("Initiating secure booking process...");
     
+    let bookingId: string | undefined;
     try {
       // 1. Post booking creation (sets to Pending and locks seats)
       const bookingRes = await api.post<any>("/bookings", {
@@ -121,7 +122,7 @@ function Checkout() {
         phone: contact.phone
       });
       
-      const bookingId = bookingRes.booking_id;
+      bookingId = bookingRes.booking_id;
       
       // 2. Simulate Razorpay Gateway Interaction
       toast.loading("Contacting Razorpay APIs... Please wait.", { id: "razorpay_payment" });
@@ -145,6 +146,15 @@ function Checkout() {
       });
     } catch (err: any) {
       toast.error(err.message || "Failed to finalize booking.", { id: "razorpay_payment" });
+      if (bookingId) {
+        try {
+          const booking = await api.get<any>(`/bookings/${bookingId}`);
+          if (booking.booking_status === "Pending") {
+            await api.post(`/bookings/${bookingId}/cancel`, {});
+            toast.info("Your selected seats have been released.", { id: "seat_release" });
+          }
+        } catch {}
+      }
     } finally {
       setPaying(false);
     }
