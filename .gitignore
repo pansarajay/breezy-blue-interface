@@ -41,3 +41,18 @@ backend/.venv/
 __pycache__/
 *.pyc
 
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Python test and coverage files
+.pytest_cache/
+.coverage
+htmlcov/
